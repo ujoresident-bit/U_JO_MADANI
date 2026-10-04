@@ -1,0 +1,20 @@
+# Render Blueprint (optional). You can also create the service manually — see README.
+services:
+  - type: worker                 # Background Worker: no port, runs continuously
+    name: ujo-flashcards-bot
+    runtime: python
+    plan: starter                # Background Workers are not available on the free plan
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.8"
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false              # entered in the dashboard, never stored in git
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: LOG_LEVEL
+        value: INFO
