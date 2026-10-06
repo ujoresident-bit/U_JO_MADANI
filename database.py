@@ -18,8 +18,10 @@ log = logging.getLogger(__name__)
 USERS = "allowed_users"
 CARDS = "flashcards"
 PROGRESS = "user_progress"
+SAVED = "saved_flashcards"
+NOTES = "user_notes"
 
-CARD_COLUMNS = "id,content,category,year,order_number,is_active"
+CARD_COLUMNS = "id,content,answer,category,year,order_number,is_active"
 USER_COLUMNS = "id,username,telegram_user_id,status"
 
 Row = dict[str, Any]
@@ -162,5 +164,92 @@ class Database:
                 },
                 on_conflict="telegram_user_id",
             )
+            .execute()
+        )
+
+    # ------------------------------------------------------------ per-user card state
+    # Privacy: every method below filters by telegram_user_id, and callers
+    # always pass the ID of the Telegram user who pressed the button.
+    async def get_card_user_state(self, telegram_user_id: int, flashcard_id: int) -> tuple[bool, bool]:
+        """(is_saved, has_note) for this user and card."""
+
+        def saved():
+            return (self._client.table(SAVED).select("id")
+                    .eq("telegram_user_id", telegram_user_id).eq("flashcard_id", flashcard_id)
+                    .limit(1).execute())
+
+        def note():
+            return (self._client.table(NOTES).select("id")
+                    .eq("telegram_user_id", telegram_user_id).eq("flashcard_id", flashcard_id)
+                    .limit(1).execute())
+
+        saved_res, note_res = await asyncio.gather(self._run(saved), self._run(note))
+        return _first(saved_res) is not None, _first(note_res) is not None
+
+    # ------------------------------------------------------------ saved flashcards
+    async def add_saved(self, telegram_user_id: int, flashcard_id: int) -> None:
+        await self._run(
+            lambda: self._client.table(SAVED)
+            .upsert(
+                {"telegram_user_id": telegram_user_id, "flashcard_id": flashcard_id},
+                on_conflict="telegram_user_id,flashcard_id",
+                ignore_duplicates=True,
+            )
+            .execute()
+        )
+
+    async def remove_saved(self, telegram_user_id: int, flashcard_id: int) -> None:
+        await self._run(
+            lambda: self._client.table(SAVED)
+            .delete()
+            .eq("telegram_user_id", telegram_user_id)
+            .eq("flashcard_id", flashcard_id)
+            .execute()
+        )
+
+    async def get_saved_page(self, telegram_user_id: int, limit: int, offset: int) -> list[Row]:
+        res = await self._run(
+            lambda: self._client.rpc(
+                "saved_flashcards_page",
+                {"p_telegram_user_id": telegram_user_id, "p_limit": limit, "p_offset": offset},
+            ).execute()
+        )
+        return list(getattr(res, "data", None) or [])
+
+    # ------------------------------------------------------------ notes
+    async def get_note(self, telegram_user_id: int, flashcard_id: int) -> str | None:
+        res = await self._run(
+            lambda: self._client.table(NOTES)
+            .select("note_text")
+            .eq("telegram_user_id", telegram_user_id)
+            .eq("flashcard_id", flashcard_id)
+            .limit(1)
+            .execute()
+        )
+        row = _first(res)
+        return row.get("note_text") if row else None
+
+    async def save_note(self, telegram_user_id: int, flashcard_id: int, note_text: str) -> None:
+        """Insert or update the same record (one note per user per card)."""
+        await self._run(
+            lambda: self._client.table(NOTES)
+            .upsert(
+                {
+                    "telegram_user_id": telegram_user_id,
+                    "flashcard_id": flashcard_id,
+                    "note_text": note_text,
+                    "updated_at": _now(),
+                },
+                on_conflict="telegram_user_id,flashcard_id",
+            )
+            .execute()
+        )
+
+    async def delete_note(self, telegram_user_id: int, flashcard_id: int) -> None:
+        await self._run(
+            lambda: self._client.table(NOTES)
+            .delete()
+            .eq("telegram_user_id", telegram_user_id)
+            .eq("flashcard_id", flashcard_id)
             .execute()
         )
