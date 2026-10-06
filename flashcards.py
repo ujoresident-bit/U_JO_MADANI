@@ -135,7 +135,7 @@ def excerpt(text: str | None, limit: int = 70) -> str:
     return value if len(value) <= limit else value[: limit - 1].rstrip() + "…"
 
 
-def format_card_text(card: Row, revealed: bool = False, notice: str | None = None) -> str:
+def format_card_text(card: Row, revealed: bool = False, notice: str | None = None, watermark: str | None = None) -> str:
     # The answer is added to the message text ONLY when revealed=True.
     content, answer = question_and_answer(card)
     if len(content) + len(answer) > MAX_CONTENT_CHARS:
@@ -157,6 +157,8 @@ def format_card_text(card: Row, revealed: bool = False, notice: str | None = Non
             if revealed
             else texts.ANSWER_HIDDEN
         )
+    if watermark:  # identifies whose copy this is, to trace leaked screenshots
+        parts += ["", watermark]
     return "\n".join(parts)
 
 
@@ -191,9 +193,10 @@ def render_card(
     is_saved: bool = False,
     has_note: bool = False,
     notice: str | None = None,
+    watermark: str | None = None,
 ) -> tuple[str, InlineKeyboardMarkup]:
     revealed = revealed and has_answer(card)
-    return format_card_text(card, revealed, notice), card_keyboard(card, revealed, is_saved, has_note)
+    return format_card_text(card, revealed, notice, watermark), card_keyboard(card, revealed, is_saved, has_note)
 
 
 # --------------------------------------------------------------------- home
