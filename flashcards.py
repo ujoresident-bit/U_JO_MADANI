@@ -80,8 +80,49 @@ def parse_open(data: str) -> tuple[int, bool] | None:
 
 
 # --------------------------------------------------------------------- card
+_BLANK_LINE_RE = re.compile(r"\n[ \t]*\n")
+
+
+def split_content(content: str | None) -> tuple[str, str]:
+    """Split a stored card into (question, answer) for display only.
+
+    Cards store the question and the answer together in `content`, e.g.
+        "Most common cause of CAP in adults?\\nStreptococcus pneumoniae"
+    Rules, in order:
+      1. first blank line   -> question above, answer below
+      2. otherwise newline  -> last line is the answer
+      3. otherwise ? / ؟ / : -> text after the first one is the answer
+    If none applies, the whole text is the question and there is no answer.
+    """
+    text = (content or "").strip()
+
+    parts = _BLANK_LINE_RE.split(text, maxsplit=1)
+    if len(parts) == 2 and parts[0].strip() and parts[1].strip():
+        return parts[0].strip(), parts[1].strip()
+
+    if "\n" in text:
+        question, answer = text.rsplit("\n", 1)
+        if question.strip() and answer.strip():
+            return question.strip(), answer.strip()
+
+    for mark in ("?", "؟", ":"):
+        i = text.find(mark)
+        if 0 < i < len(text) - 1 and text[i + 1 :].strip():
+            return text[: i + 1].strip(), text[i + 1 :].strip()
+
+    return text, ""
+
+
+def question_and_answer(card: Row) -> tuple[str, str]:
+    """The `answer` column wins when it is filled; otherwise split `content`."""
+    answer = (card.get("answer") or "").strip()
+    if answer:
+        return (card.get("content") or "").strip(), answer
+    return split_content(card.get("content"))
+
+
 def has_answer(card: Row) -> bool:
-    return bool((card.get("answer") or "").strip())
+    return bool(question_and_answer(card)[1])
 
 
 def card_number(card: Row) -> int:
@@ -89,13 +130,14 @@ def card_number(card: Row) -> int:
 
 
 def excerpt(text: str | None, limit: int = 70) -> str:
-    value = re.sub(r"\s+", " ", text or "").strip()
+    """Short one-line preview of the QUESTION only (never includes the answer)."""
+    value = re.sub(r"\s+", " ", split_content(text)[0]).strip()
     return value if len(value) <= limit else value[: limit - 1].rstrip() + "…"
 
 
 def format_card_text(card: Row, revealed: bool = False, notice: str | None = None) -> str:
-    content = (card.get("content") or "").strip()
-    answer = (card.get("answer") or "").strip()
+    # The answer is added to the message text ONLY when revealed=True.
+    content, answer = question_and_answer(card)
     if len(content) + len(answer) > MAX_CONTENT_CHARS:
         log.warning("Flashcard id=%s is too long; truncated for display.", card.get("id"))
         content = content[: max(MAX_CONTENT_CHARS - len(answer), 200) - 1].rstrip() + "…"
@@ -105,7 +147,6 @@ def format_card_text(card: Row, revealed: bool = False, notice: str | None = Non
         parts += [notice, ""]
     parts += [
         texts.CARD_TITLE.format(number=card_number(card)),
-        DIVIDER,
         "",
         html.escape(content, quote=False),
     ]
