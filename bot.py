@@ -80,6 +80,7 @@ def main() -> None:
             Defaults(
                 parse_mode=ParseMode.HTML,
                 link_preview_options=LinkPreviewOptions(is_disabled=True),
+                protect_content=True,  # no forwarding, copying or saving
             )
         )
         .connect_timeout(15)
