@@ -34,6 +34,7 @@ NO_USERNAME = (
 CARD_TITLE = "🧠 <b>FLASHCARD {number:03d}</b>"
 ANSWER_HIDDEN = "🔒 <i>الإجابة مخفية</i>"
 ANSWER_SHOWN = "✅ <b>{answer}</b>"
+WATERMARK = "<i>🔐 نسخة خاصة بالمستخدم {tid}</i>"
 
 # ------------------------------------------------------------------ saved list
 SAVED_TITLE = "⭐ <b>المحفوظة</b> ({total})"
