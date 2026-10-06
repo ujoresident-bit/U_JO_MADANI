@@ -85,9 +85,21 @@ async def edit_or_send(
 
 
 async def show(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, keyboard: InlineKeyboardMarkup) -> None:
-    """Edit the message whose button was pressed."""
+    """Edit the message whose button was pressed.
+
+    Protection can only be set when a message is SENT, not when it is edited.
+    So a message sent before protection was turned on is deleted and replaced
+    by a new, protected one.
+    """
     query = update.callback_query
-    message_id = query.message.message_id if query is not None and query.message is not None else None
+    message = query.message if query is not None else None
+    message_id = message.message_id if message is not None else None
+    if message is not None and not getattr(message, "has_protected_content", False):
+        try:
+            await message.delete()
+        except Exception:  # too old to delete: just send the new protected message
+            pass
+        message_id = None
     await edit_or_send(context, update.effective_user.id, message_id, text, keyboard)
 
 
@@ -96,7 +108,14 @@ async def render_card_for_user(
 ) -> tuple[str, InlineKeyboardMarkup]:
     """Card text + keyboard with THIS user's saved / note state."""
     is_saved, has_note = await db.get_card_user_state(telegram_user_id, card["id"])
-    return render_card(card, revealed=revealed, is_saved=is_saved, has_note=has_note, notice=notice)
+    return render_card(
+        card,
+        revealed=revealed,
+        is_saved=is_saved,
+        has_note=has_note,
+        notice=notice,
+        watermark=texts.WATERMARK.format(tid=telegram_user_id),
+    )
 
 
 async def show_card(
