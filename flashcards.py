@@ -25,6 +25,7 @@ import re
 from telegram import InlineKeyboardButton as Button
 from telegram import InlineKeyboardMarkup
 
+import question_order
 import texts
 from database import Database, Row
 
@@ -126,7 +127,8 @@ def has_answer(card: Row) -> bool:
 
 
 def card_number(card: Row) -> int:
-    return int(card.get("order_number") or 0)
+    """Position in THIS user's random order (set by question_order)."""
+    return int(card.get("display_number") or card.get("order_number") or 0)
 
 
 def excerpt(text: str | None, limit: int = 70) -> str:
@@ -216,16 +218,11 @@ async def resolve_continue_card(db: Database, telegram_user_id: int) -> Row | No
     """The card a user should continue from, or None if there is no progress.
 
     If the saved card was hidden (is_active = false), continue from the next
-    active card after it instead of failing.
+    active card after it (in this user's random order) instead of failing.
     """
     progress = await db.get_progress(telegram_user_id)
     card_id = progress.get("last_flashcard_id") if progress else None
     if not card_id:
         return None
-
-    card = await db.get_card(card_id, active_only=False)
-    if card is None:
-        return None
-    if card.get("is_active"):
-        return card
-    return await db.get_card_at_or_after(card["order_number"])
+    # The saved question if still active, else the next one in this user's order
+    return await question_order.card_at_or_after(db, telegram_user_id, card_id)
