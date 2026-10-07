@@ -27,6 +27,7 @@ from flashcards import (
 )
 import question_order
 from notes import on_non_text, on_note_button, on_note_text
+from my_notes import on_notes_list
 from saved import on_saved
 
 log = logging.getLogger(__name__)
@@ -76,9 +77,9 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     # Home
     if data == CB_HOME:
+        await query.answer()
         text, keyboard = await _home_view(db, user.id)
         await show(update, context, text, keyboard)
-        await query.answer()
         return
 
     # Resolve which card to show
@@ -123,15 +124,20 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await query.answer(texts.NO_FLASHCARDS, show_alert=True)
         return
 
+    await query.answer()  # stop the button's loading spinner right away
     await show_card(update, context, card, revealed=revealed)
-    await query.answer()
     log.info("Flashcard sent: telegram_id=%s card_id=%s revealed=%s", user.id, card["id"], revealed)
 
-    # Progress is always saved for the user who pressed the button.
+    # Progress is always saved for the user who pressed the button,
+    # in the background so the user never waits for it.
+    context.application.create_task(_save_progress(db, user.id, card["id"]), update=update)
+
+
+async def _save_progress(db: Database, telegram_user_id: int, card_id: int) -> None:
     try:
-        await db.save_progress(user.id, card["id"])
+        await db.save_progress(telegram_user_id, card_id)
     except DatabaseError:
-        log.warning("Progress not saved for telegram_id=%s", user.id)
+        log.warning("Progress not saved for telegram_id=%s", telegram_user_id)
 
 
 async def on_unknown_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -178,6 +184,7 @@ def register_handlers(app: Application) -> None:
     app.add_handler(CallbackQueryHandler(on_callback, pattern=r"^(home|fc:.+)$"))
     app.add_handler(CallbackQueryHandler(on_saved, pattern=r"^sv:"))
     app.add_handler(CallbackQueryHandler(on_note_button, pattern=r"^nt:"))
+    app.add_handler(CallbackQueryHandler(on_notes_list, pattern=r"^nl:"))
     app.add_handler(CallbackQueryHandler(on_unknown_callback))
     app.add_handler(MessageHandler(private & filters.TEXT & ~filters.COMMAND, on_note_text))
     app.add_handler(MessageHandler(private & ~filters.TEXT & ~filters.COMMAND, on_non_text))
