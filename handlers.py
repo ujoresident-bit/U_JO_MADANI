@@ -25,6 +25,7 @@ from flashcards import (
     parse_open,
     resolve_continue_card,
 )
+import question_order
 from notes import on_non_text, on_note_button, on_note_text
 from saved import on_saved
 
@@ -84,9 +85,9 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     log.info("Flashcard requested: telegram_id=%s action=%s", user.id, data)
     revealed = False  # every newly opened card starts with the answer hidden
     if data == CB_FIRST:
-        card = await db.get_first_card()
+        card = await question_order.first_card(db, user.id)
     elif data == CB_CONTINUE:
-        card = await resolve_continue_card(db, user.id) or await db.get_first_card()
+        card = await resolve_continue_card(db, user.id) or await question_order.first_card(db, user.id)
     elif (opened := parse_open(data)) is not None:
         # Same card: show/hide answer, back from a note, or open from the saved list
         card_id, revealed = opened
@@ -106,13 +107,14 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             await query.answer(texts.INVALID_CARD, show_alert=True)
             return
 
+        # Next / Previous follow THIS user's random order
         if direction == NEXT:
-            card = await db.get_next_card(current["order_number"])
+            card = await question_order.next_card(db, user.id, current_id)
             if card is None:
                 await query.answer(texts.LAST_CARD)
                 return
         else:
-            card = await db.get_previous_card(current["order_number"])
+            card = await question_order.previous_card(db, user.id, current_id)
             if card is None:
                 await query.answer(texts.FIRST_CARD)
                 return
