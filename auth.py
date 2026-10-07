@@ -8,10 +8,15 @@ Rules:
 3. No username and no registered ID -> rejected.
 
 `authorize()` is called before EVERY command and button press.
+
+Speed: a successful check is remembered for AUTH_CACHE_SECONDS, so button
+presses don't wait for the database every time. /start always re-checks.
+A user you disable is therefore cut off within 30 seconds at most.
 """
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from enum import Enum
 
@@ -21,6 +26,15 @@ from database import Database, DatabaseError, Row
 from utils import normalize_username
 
 log = logging.getLogger(__name__)
+
+AUTH_CACHE_SECONDS = 30
+_recently_allowed: dict[int, float] = {}  # telegram_user_id -> time of last successful check
+
+
+def _remember(tid: int) -> None:
+    if len(_recently_allowed) > 5000:
+        _recently_allowed.clear()
+    _recently_allowed[tid] = time.monotonic()
 
 
 class AuthStatus(Enum):
@@ -42,6 +56,13 @@ class AuthResult:
 async def authorize(db: Database, tg_user: User, touch: bool = False) -> AuthResult:
     tid = tg_user.id
 
+    # 0) Allowed a few seconds ago -> no database request needed.
+    if not touch:
+        checked_at = _recently_allowed.get(tid)
+        if checked_at is not None and time.monotonic() - checked_at < AUTH_CACHE_SECONDS:
+            return AuthResult(AuthStatus.AUTHORIZED)
+    _recently_allowed.pop(tid, None)
+
     # 1) Known Telegram ID -> status decides.
     row = await db.get_user_by_telegram_id(tid)
     if row is not None:
@@ -52,6 +73,7 @@ async def authorize(db: Database, tg_user: User, touch: bool = False) -> AuthRes
                 except DatabaseError:
                     pass  # last_seen is non-critical
             log.info("User authorized: telegram_id=%s", tid)
+            _remember(tid)
             return AuthResult(AuthStatus.AUTHORIZED, row)
         log.info("User rejected (status=%s): telegram_id=%s", row.get("status"), tid)
         return AuthResult(AuthStatus.NOT_ALLOWED)
@@ -68,11 +90,13 @@ async def authorize(db: Database, tg_user: User, touch: bool = False) -> AuthRes
         # e.g. a race where this ID got linked in parallel; re-check by ID once.
         row = await db.get_user_by_telegram_id(tid)
         if row is not None and row.get("status") == "active":
+            _remember(tid)
             return AuthResult(AuthStatus.AUTHORIZED, row)
         raise
 
     if row is not None:
         log.info("User activated (first login): telegram_id=%s", tid)
+        _remember(tid)
         return AuthResult(AuthStatus.AUTHORIZED, row)
 
     log.info("User rejected (not in allowed list): telegram_id=%s", tid)
