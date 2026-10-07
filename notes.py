@@ -94,37 +94,37 @@ async def on_note_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             "chat_id": user.id,
             "message_id": query.message.message_id if query.message is not None else None,
         }
+        await query.answer()
         text, keyboard = _prompt_view(card, revealed, current)
         await show(update, context, text, keyboard)
-        await query.answer()
         return
 
     if action == "view":
+        await query.answer()
         note = await db.get_note(user.id, card_id)
         if note is None:
             await show_card(update, context, card, revealed=revealed)
         else:
             text, keyboard = _note_view(card, revealed, note)
             await show(update, context, text, keyboard)
-        await query.answer()
         return
 
     if action == "del":
+        await query.answer()
         text, keyboard = _delete_confirm_view(card, revealed)
         await show(update, context, text, keyboard)
-        await query.answer()
         return
 
     if action == "yes":
+        await query.answer()
         await db.delete_note(user.id, card_id)
         log.info("Note deleted: telegram_id=%s card_id=%s", user.id, card_id)
         await show_card(update, context, card, revealed=revealed, notice=texts.NOTE_DELETED)
-        await query.answer()
         return
 
     # cancel
-    await show_card(update, context, card, revealed=revealed)
     await query.answer()
+    await show_card(update, context, card, revealed=revealed)
 
 
 # --------------------------------------------------------------------- typed note
