@@ -3,11 +3,20 @@
 Every query lives here, so the rest of the bot never talks to Supabase
 directly. The supabase-py client is synchronous, so each call runs in a
 worker thread (asyncio.to_thread) to keep the bot responsive.
+
+Speed: the database is far from the bot, so every request costs time.
+Two in-memory caches remove almost all requests from a button press:
+  * active questions: loaded together, refreshed every 60 seconds
+    (an edit made in Supabase shows up within a minute);
+  * each user's saved questions + notes: loaded once, then kept up to date
+    by this bot's own writes, re-read every 10 minutes.
+The bot runs as ONE process, so these caches always match its own writes.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -26,6 +35,10 @@ USER_COLUMNS = "id,username,telegram_user_id,status"
 
 Row = dict[str, Any]
 
+CARD_CACHE_SECONDS = 60
+USER_STATE_SECONDS = 600
+PAGE_SIZE = 1000  # Supabase returns at most 1000 rows per request
+
 
 class DatabaseError(Exception):
     """Any failure talking to Supabase."""
@@ -43,6 +56,13 @@ def _first(response: Any) -> Row | None:
 class Database:
     def __init__(self, url: str, key: str) -> None:
         self._client: Client = create_client(url, key)
+        # active questions cache
+        self._cards: dict[int, Row] = {}
+        self._active_ids: list[int] = []
+        self._cards_loaded_at: float | None = None
+        self._cards_lock = asyncio.Lock()
+        # per-user cache: telegram_user_id -> (loaded_at, saved ids, noted ids)
+        self._user_state: dict[int, tuple[float, set[int], set[int]]] = {}
 
     async def _run(self, fn: Callable[[], Any]) -> Any:
         try:
@@ -108,12 +128,56 @@ class Database:
         )
 
     # ------------------------------------------------------------ flashcards
+    def _cards_fresh(self) -> bool:
+        return self._cards_loaded_at is not None and time.monotonic() - self._cards_loaded_at < CARD_CACHE_SECONDS
+
+    async def _load_active_cards(self) -> list[Row]:
+        rows: list[Row] = []
+        start = 0
+        while True:
+            res = await self._run(
+                lambda s=start: self._client.table(CARDS)
+                .select(CARD_COLUMNS)
+                .eq("is_active", "true")
+                .order("id")
+                .range(s, s + PAGE_SIZE - 1)
+                .execute()
+            )
+            page = list(getattr(res, "data", None) or [])
+            rows.extend(page)
+            if len(page) < PAGE_SIZE:
+                return rows
+            start += PAGE_SIZE
+
+    async def _ensure_cards(self) -> None:
+        if self._cards_fresh():
+            return
+        async with self._cards_lock:
+            if self._cards_fresh():
+                return
+            try:
+                rows = await self._load_active_cards()
+            except DatabaseError:
+                if self._cards_loaded_at is not None:
+                    return  # keep serving the last known questions
+                raise
+            self._cards = {int(r["id"]): r for r in rows}
+            self._active_ids = sorted(self._cards)
+            self._cards_loaded_at = time.monotonic()
+            log.info("Questions cache refreshed: %s active questions.", len(self._cards))
+
+    async def get_active_card_ids(self) -> list[int]:
+        await self._ensure_cards()
+        return self._active_ids
+
     async def get_card(self, card_id: int, active_only: bool = True) -> Row | None:
-        def query():
-            q = self._client.table(CARDS).select(CARD_COLUMNS).eq("id", card_id)
-            if active_only:
-                q = q.eq("is_active", "true")
-            return q.limit(1).execute()
+        await self._ensure_cards()
+        card = self._cards.get(int(card_id))
+        if card is not None or active_only:
+            return card
+
+        def query():  # inactive / deleted question: ask the database
+            return self._client.table(CARDS).select(CARD_COLUMNS).eq("id", card_id).limit(1).execute()
 
         return _first(await self._run(query))
 
@@ -170,21 +234,38 @@ class Database:
     # ------------------------------------------------------------ per-user card state
     # Privacy: every method below filters by telegram_user_id, and callers
     # always pass the ID of the Telegram user who pressed the button.
+    async def _user_sets(self, telegram_user_id: int) -> tuple[set[int], set[int]]:
+        """(saved question ids, noted question ids) for this user, cached."""
+        entry = self._user_state.get(telegram_user_id)
+        if entry is not None and time.monotonic() - entry[0] < USER_STATE_SECONDS:
+            return entry[1], entry[2]
+
+        def ids(table: str):
+            return (self._client.table(table).select("flashcard_id")
+                    .eq("telegram_user_id", telegram_user_id).limit(PAGE_SIZE).execute())
+
+        saved_res, note_res = await asyncio.gather(self._run(lambda: ids(SAVED)), self._run(lambda: ids(NOTES)))
+        saved = {int(r["flashcard_id"]) for r in (getattr(saved_res, "data", None) or [])}
+        noted = {int(r["flashcard_id"]) for r in (getattr(note_res, "data", None) or [])}
+        if len(self._user_state) > 5000:
+            self._user_state.clear()
+        self._user_state[telegram_user_id] = (time.monotonic(), saved, noted)
+        return saved, noted
+
+    def _update_user_sets(self, telegram_user_id: int, flashcard_id: int, *, saved: bool | None = None, noted: bool | None = None) -> None:
+        entry = self._user_state.get(telegram_user_id)
+        if entry is None:
+            return  # not cached yet: the next read loads it from the database
+        fid = int(flashcard_id)
+        if saved is not None:
+            (entry[1].add if saved else entry[1].discard)(fid)
+        if noted is not None:
+            (entry[2].add if noted else entry[2].discard)(fid)
+
     async def get_card_user_state(self, telegram_user_id: int, flashcard_id: int) -> tuple[bool, bool]:
         """(is_saved, has_note) for this user and card."""
-
-        def saved():
-            return (self._client.table(SAVED).select("id")
-                    .eq("telegram_user_id", telegram_user_id).eq("flashcard_id", flashcard_id)
-                    .limit(1).execute())
-
-        def note():
-            return (self._client.table(NOTES).select("id")
-                    .eq("telegram_user_id", telegram_user_id).eq("flashcard_id", flashcard_id)
-                    .limit(1).execute())
-
-        saved_res, note_res = await asyncio.gather(self._run(saved), self._run(note))
-        return _first(saved_res) is not None, _first(note_res) is not None
+        saved, noted = await self._user_sets(telegram_user_id)
+        return int(flashcard_id) in saved, int(flashcard_id) in noted
 
     # ------------------------------------------------------------ saved flashcards
     async def add_saved(self, telegram_user_id: int, flashcard_id: int) -> None:
@@ -197,6 +278,7 @@ class Database:
             )
             .execute()
         )
+        self._update_user_sets(telegram_user_id, flashcard_id, saved=True)
 
     async def remove_saved(self, telegram_user_id: int, flashcard_id: int) -> None:
         await self._run(
@@ -206,6 +288,7 @@ class Database:
             .eq("flashcard_id", flashcard_id)
             .execute()
         )
+        self._update_user_sets(telegram_user_id, flashcard_id, saved=False)
 
     async def get_saved_page(self, telegram_user_id: int, limit: int, offset: int) -> list[Row]:
         res = await self._run(
@@ -244,6 +327,7 @@ class Database:
             )
             .execute()
         )
+        self._update_user_sets(telegram_user_id, flashcard_id, noted=True)
 
     async def delete_note(self, telegram_user_id: int, flashcard_id: int) -> None:
         await self._run(
@@ -253,3 +337,14 @@ class Database:
             .eq("flashcard_id", flashcard_id)
             .execute()
         )
+        self._update_user_sets(telegram_user_id, flashcard_id, noted=False)
+
+    async def get_notes_page(self, telegram_user_id: int, limit: int, offset: int) -> list[Row]:
+        """One page of THIS user's notes (newest first) with the question text."""
+        res = await self._run(
+            lambda: self._client.rpc(
+                "user_notes_page",
+                {"p_telegram_user_id": telegram_user_id, "p_limit": limit, "p_offset": offset},
+            ).execute()
+        )
+        return list(getattr(res, "data", None) or [])
