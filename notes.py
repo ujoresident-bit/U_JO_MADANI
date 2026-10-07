@@ -24,6 +24,7 @@ from telegram.ext import ContextTypes
 import texts
 from common import NOTE_STATE_KEY, clear_note_state, edit_or_send, get_db, guard, render_card_for_user, show, show_card
 from flashcards import card_number, excerpt, note_data, open_data
+from question_order import with_number
 
 log = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ _NOTE_RE = re.compile(r"^nt:(add|edit|view|del|yes|cancel):(\d{1,18}):([01])$")
 
 
 def _card_line(card) -> str:
-    return f"<i>FLASHCARD {card_number(card):03d} · {html.escape(excerpt(card.get('content'), 90), quote=False)}</i>"
+    return f"<i>QUESTION {card_number(card)} · {html.escape(excerpt(card.get('content'), 90), quote=False)}</i>"
 
 
 def _prompt_view(card, revealed: bool, current_note: str | None = None, error: str | None = None):
@@ -83,6 +84,7 @@ async def on_note_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if card is None:
         await query.answer(texts.INVALID_CARD, show_alert=True)
         return
+    card = await with_number(db, user.id, card)  # this user's QUESTION number
 
     if action in ("add", "edit"):
         current = await db.get_note(user.id, card_id) if action == "edit" else None
@@ -150,6 +152,7 @@ async def on_note_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         clear_note_state(context)
         await update.effective_message.reply_text(texts.INVALID_CARD)
         return
+    card = await with_number(db, user.id, card)  # this user's QUESTION number
 
     note = (update.effective_message.text or "").strip()
     error = None
