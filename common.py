@@ -12,6 +12,7 @@ import texts
 from auth import AuthStatus, authorize
 from database import Database, Row
 from flashcards import render_card
+from question_order import with_number
 
 log = logging.getLogger(__name__)
 
@@ -106,7 +107,8 @@ async def show(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, ke
 async def render_card_for_user(
     db: Database, telegram_user_id: int, card: Row, revealed: bool = False, notice: str | None = None
 ) -> tuple[str, InlineKeyboardMarkup]:
-    """Card text + keyboard with THIS user's saved / note state."""
+    """Card text + keyboard with THIS user's saved / note state and question number."""
+    card = await with_number(db, telegram_user_id, card)
     is_saved, has_note = await db.get_card_user_state(telegram_user_id, card["id"])
     return render_card(
         card,
