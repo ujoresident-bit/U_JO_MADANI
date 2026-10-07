@@ -54,7 +54,7 @@ async def on_startup(app: Application) -> None:
         log.error("Database connection failed at startup. The bot will keep running and retry per request.")
 
     await app.bot.set_my_commands(
-        [BotCommand("start", "Open U JO Flashcards"), BotCommand("help", "How to use the bot")]
+        [BotCommand("start", "الصفحة الرئيسية"), BotCommand("help", "طريقة الاستخدام")]
     )
     app.create_task(_db_keepalive(db), name="db-keepalive")
     log.info("Bot started successfully as @%s", app.bot.username)
@@ -97,12 +97,4 @@ def main() -> None:
     # Blocks until SIGTERM/SIGINT (Render sends SIGTERM on redeploy).
     app.run_polling(
         allowed_updates=[Update.MESSAGE, Update.CALLBACK_QUERY],
-        timeout=30,               # long-poll wait on Telegram's side
-        bootstrap_retries=-1,     # keep retrying if Telegram is unreachable at boot
-        drop_pending_updates=False,
-    )
-    log.info("Bot stopped.")
-
-
-if __name__ == "__main__":
-    main()
+        timeout=30,               #
