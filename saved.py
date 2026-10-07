@@ -73,9 +73,9 @@ async def on_saved(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     match = _LIST_RE.match(data)
     if match:
+        await query.answer()
         text, keyboard = await _render_list(db, user.id, int(match.group(1)))
         await show(update, context, text, keyboard)
-        await query.answer()
         return
 
     match = _TOGGLE_RE.match(data)
@@ -98,5 +98,5 @@ async def on_saved(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await query.answer(texts.SAVED_REMOVED)
             return
 
-    await show_card(update, context, card, revealed=revealed)
     await query.answer(texts.SAVED_ADDED if turn_on else texts.SAVED_REMOVED)
+    await show_card(update, context, card, revealed=revealed)
