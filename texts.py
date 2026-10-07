@@ -14,12 +14,12 @@ WELCOME = (
 )
 
 HELP = (
-    "<b>U JO Flashcards</b>\n\n"
+    "<b>U JO MADANI</b>\n\n"
     "• أرسل /start لفتح الصفحة الرئيسية.\n"
-    "• <b>👁 إظهار الإجابة</b> لعرض إجابة الـ Flashcard.\n"
+    "• <b>👁 إظهار الإجابة</b> لعرض إجابة السؤال.\n"
     "• <b>◀ السابق</b> و<b>التالي ▶</b> للتنقل.\n"
-    "• <b>⭐ حفظ</b> لإضافة الـ Flashcard إلى المحفوظة.\n"
-    "• <b>📝 Note</b> لإضافة ملاحظة شخصية لا يراها غيرك.\n"
+    "• <b>⭐ حفظ</b> لإضافة السؤال إلى المحفوظة.\n"
+    "• <b>📝 ملاحظة</b> لإضافة ملاحظة شخصية لا يراها غيرك.\n"
     "• يتم حفظ مكانك تلقائيًا، واضغط <b>🚀 لنبدأ</b> للمتابعة."
 )
 
@@ -31,21 +31,21 @@ NO_USERNAME = (
 )
 
 # ------------------------------------------------------------------ flashcard
-CARD_TITLE = "🧠 <b>FLASHCARD {number:03d}</b>"
+CARD_TITLE = "🧠 <b>QUESTION {number}</b>"
 ANSWER_HIDDEN = "🔒 <i>الإجابة مخفية</i>"
 ANSWER_SHOWN = "✅ <b>{answer}</b>"
 WATERMARK = "<i>🔐 نسخة خاصة بالمستخدم {tid}</i>"
 
 # ------------------------------------------------------------------ saved list
 SAVED_TITLE = "⭐ <b>المحفوظة</b> ({total})"
-SAVED_EMPTY = "⭐ <b>المحفوظة</b>\n\nلا توجد Flashcards محفوظة حالياً."
-SAVED_HINT = "<i>اختر رقمًا لفتح الـ Flashcard.</i>"
+SAVED_EMPTY = "⭐ <b>المحفوظة</b>\n\nلا توجد أسئلة محفوظة حالياً."
+SAVED_HINT = "<i>اختر رقمًا لفتح السؤال.</i>"
 
 # ------------------------------------------------------------------ notes
-NOTE_PROMPT = "📝 اكتب ملاحظتك لهذه الـ Flashcard:"
+NOTE_PROMPT = "📝 اكتب ملاحظتك لهذا السؤال:"
 NOTE_EDIT_PROMPT = "✏️ اكتب النص الجديد للملاحظة:"
 NOTE_CURRENT = "<b>الملاحظة الحالية:</b>"
-NOTE_VIEW_TITLE = "📝 <b>ملاحظتك</b> · FLASHCARD {number:03d}"
+NOTE_VIEW_TITLE = "📝 <b>ملاحظتك</b> · QUESTION {number}"
 NOTE_DELETE_CONFIRM = "هل أنت متأكد من حذف هذه الملاحظة؟"
 NOTE_EMPTY = "⚠️ الملاحظة فارغة. اكتب نص الملاحظة أو اضغط إلغاء."
 NOTE_TOO_LONG = "⚠️ الملاحظة طويلة جدًا (الحد الأقصى {max} حرف). اختصرها وأرسلها مرة أخرى."
@@ -56,10 +56,10 @@ NOTE_DELETED = "🗑 تم حذف الملاحظة."
 # ------------------------------------------------------------------ short popups (max 200 chars)
 SAVED_ADDED = "⭐ تمت إضافتها إلى المحفوظة."
 SAVED_REMOVED = "تمت إزالتها من المحفوظة."
-FIRST_CARD = "هذه أول Flashcard."
-LAST_CARD = "🎉 وصلت إلى آخر Flashcard."
-NO_FLASHCARDS = "لا توجد Flashcards متاحة حاليًا. يرجى المحاولة لاحقًا."
-INVALID_CARD = "هذه الـ Flashcard لم تعد متاحة."
+FIRST_CARD = "هذا أول سؤال."
+LAST_CARD = "🎉 وصلت إلى آخر سؤال."
+NO_FLASHCARDS = "لا توجد أسئلة متاحة حاليًا. يرجى المحاولة لاحقًا."
+INVALID_CARD = "هذا السؤال لم يعد متاحًا."
 UNKNOWN_ACTION = "هذا الزر لم يعد صالحًا. أرسل /start."
 GENERIC_ERROR = "⚠️ حدث خطأ مؤقت. يرجى المحاولة مرة أخرى بعد قليل."
 
@@ -71,7 +71,7 @@ BTN_HOME = "🏠 الرئيسية"
 BTN_SHOW_ANSWER = "👁 إظهار الإجابة"
 BTN_SAVE = "⭐ حفظ"
 BTN_SAVED_ON = "⭐ محفوظة"
-BTN_ADD_NOTE = "📝 Note"
+BTN_ADD_NOTE = "📝 ملاحظة"
 BTN_VIEW_NOTE = "📝 عرض الملاحظة"
 BTN_PREVIOUS = "◀ السابق"
 BTN_NEXT = "التالي ▶"
