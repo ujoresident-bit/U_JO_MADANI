@@ -20,12 +20,11 @@ import hashlib
 import logging
 import time
 
-from database import CARDS, Database, DatabaseError, Row
+from database import Database, DatabaseError, Row
 
 log = logging.getLogger(__name__)
 
 CACHE_SECONDS = 60          # how often the list of active question ids is refreshed
-PAGE_SIZE = 1000            # Supabase returns at most 1000 rows per request
 MAX_SKIP = 5                # questions hidden in the last minute are skipped
 _SALT = "ujo-question-order-v1"
 
@@ -42,23 +41,8 @@ def sort_key(telegram_user_id: int, card_id: int) -> int:
 
 
 async def _load_active_ids(db: Database) -> list[int]:
-    """Ids only (small), all pages, ordered by id."""
-    ids: list[int] = []
-    start = 0
-    while True:
-        res = await db._run(
-            lambda s=start: db._client.table(CARDS)
-            .select("id")
-            .eq("is_active", "true")
-            .order("id")
-            .range(s, s + PAGE_SIZE - 1)
-            .execute()
-        )
-        rows = getattr(res, "data", None) or []
-        ids.extend(int(r["id"]) for r in rows)
-        if len(rows) < PAGE_SIZE:
-            return ids
-        start += PAGE_SIZE
+    """Active question ids, from the database layer's in-memory questions cache."""
+    return list(await db.get_active_card_ids())
 
 
 async def _get_active_ids(db: Database) -> list[int]:
