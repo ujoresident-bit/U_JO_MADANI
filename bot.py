@@ -97,4 +97,12 @@ def main() -> None:
     # Blocks until SIGTERM/SIGINT (Render sends SIGTERM on redeploy).
     app.run_polling(
         allowed_updates=[Update.MESSAGE, Update.CALLBACK_QUERY],
-        timeout=30,               #
+        timeout=30,               # long-poll wait on Telegram's side
+        bootstrap_retries=-1,     # keep retrying if Telegram is unreachable at boot
+        drop_pending_updates=False,
+    )
+    log.info("Bot stopped.")
+
+
+if __name__ == "__main__":
+    main()
