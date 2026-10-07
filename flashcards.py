@@ -10,6 +10,7 @@ Callback data (short, never contains card content or user IDs):
     sv:on:<id>:<r>           -> save card          sv:off:<id>:<r> -> unsave
     sv:list:<page>           -> saved list page    sv:noop         -> page label
     nt:<act>:<id>:<r>        -> notes: add | edit | view | del | yes | cancel
+    nl:<page>                -> "my notes" list page   nl:noop -> page label
 
 <r> only remembers whether the answer is currently visible, so the screen
 can be redrawn the same way. The card id only says which card is on screen;
@@ -60,6 +61,10 @@ def save_data(on: bool, card_id: int, revealed: bool) -> str:
 
 def saved_list_data(page: int = 0) -> str:
     return f"sv:list:{page}"
+
+
+def notes_list_data(page: int = 0) -> str:
+    return f"nl:{page}"
 
 
 def note_data(action: str, card_id: int, revealed: bool) -> str:
@@ -210,7 +215,10 @@ def home_keyboard(continue_card: Row | None) -> InlineKeyboardMarkup:
             [Button(texts.BTN_START, callback_data=CB_CONTINUE)],
             [Button(texts.BTN_FROM_BEGINNING, callback_data=CB_FIRST)],
         ]
-    rows.append([Button(texts.BTN_SAVED_LIST, callback_data=saved_list_data(0))])
+    rows.append([
+        Button(texts.BTN_SAVED_LIST, callback_data=saved_list_data(0)),
+        Button(texts.BTN_NOTES_LIST, callback_data=notes_list_data(0)),
+    ])
     return InlineKeyboardMarkup(rows)
 
 
