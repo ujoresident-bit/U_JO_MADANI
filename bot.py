@@ -87,6 +87,7 @@ def main() -> None:
         .read_timeout(20)
         .write_timeout(20)
         .pool_timeout(10)
+        .concurrent_updates(True)  # serve many users at the same time
         .get_updates_read_timeout(40)
         .post_init(on_startup)
         .build()
