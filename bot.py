@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
+from concurrent.futures import ThreadPoolExecutor
 
 from telegram import BotCommand, LinkPreviewOptions, Update
 from telegram.constants import ParseMode
@@ -21,6 +22,7 @@ from handlers import register_handlers
 log = logging.getLogger("ujo")
 
 DB_KEEPALIVE_SECONDS = 6 * 60 * 60  # light query so the database never looks idle
+DB_THREADS = 32  # database calls that can run at the same time (many users at once)
 
 
 def setup_logging(level: str) -> None:
@@ -46,6 +48,10 @@ async def _db_keepalive(db: Database) -> None:
 
 
 async def on_startup(app: Application) -> None:
+    # Enough worker threads for many users pressing buttons at the same time
+    asyncio.get_running_loop().set_default_executor(
+        ThreadPoolExecutor(max_workers=DB_THREADS, thread_name_prefix="db")
+    )
     db: Database = app.bot_data["db"]
     try:
         await db.ping()
