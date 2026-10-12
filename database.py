@@ -30,7 +30,7 @@ PROGRESS = "user_progress"
 SAVED = "saved_flashcards"
 NOTES = "user_notes"
 
-CARD_COLUMNS = "id,content,answer,category,year,order_number,is_active"
+CARD_COLUMNS = "id,content,answer,category,year,order_number,is_active,created_at"
 USER_COLUMNS = "id,username,telegram_user_id,status"
 
 Row = dict[str, Any]
@@ -198,6 +198,11 @@ class Database:
     async def get_active_card_ids(self) -> list[int]:
         await self._ensure_cards()
         return self._active_ids
+
+    async def get_active_cards(self) -> list[Row]:
+        """All active questions (from the cache), sorted by id."""
+        await self._ensure_cards()
+        return [self._cards[i] for i in self._active_ids]
 
     async def get_card(self, card_id: int, active_only: bool = True) -> Row | None:
         await self._ensure_cards()
