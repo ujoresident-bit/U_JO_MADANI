@@ -63,6 +63,8 @@ class Database:
         self._cards_lock = asyncio.Lock()
         # per-user cache: telegram_user_id -> (loaded_at, saved ids, noted ids)
         self._user_state: dict[int, tuple[float, set[int], set[int]]] = {}
+        # users who already answered the specialty question
+        self._specialty_done: set[int] = set()
 
     async def _run(self, fn: Callable[[], Any]) -> Any:
         try:
@@ -126,6 +128,33 @@ class Database:
             .eq("telegram_user_id", telegram_user_id)
             .execute()
         )
+
+    # ------------------------------------------------------------ specialty
+    async def has_specialty(self, telegram_user_id: int) -> bool:
+        """True if this user already answered "which specialty?"."""
+        if telegram_user_id in self._specialty_done:
+            return True
+        res = await self._run(
+            lambda: self._client.table(USERS)
+            .select("specialty")
+            .eq("telegram_user_id", telegram_user_id)
+            .limit(1)
+            .execute()
+        )
+        row = _first(res)
+        if row and (row.get("specialty") or "").strip():
+            self._specialty_done.add(telegram_user_id)
+            return True
+        return False
+
+    async def save_specialty(self, telegram_user_id: int, specialty: str) -> None:
+        await self._run(
+            lambda: self._client.table(USERS)
+            .update({"specialty": specialty})
+            .eq("telegram_user_id", telegram_user_id)
+            .execute()
+        )
+        self._specialty_done.add(telegram_user_id)
 
     # ------------------------------------------------------------ flashcards
     def _cards_fresh(self) -> bool:
