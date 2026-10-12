@@ -19,6 +19,8 @@ log = logging.getLogger(__name__)
 # Per-user note input state, kept in context.user_data (PTB keeps a separate
 # dict for every Telegram user, so two users can never share this state).
 NOTE_STATE_KEY = "note_input"
+# Waiting for the answer to "which specialty?" (same per-user dict)
+SPECIALTY_STATE_KEY = "specialty_input"
 
 
 def get_db(context: ContextTypes.DEFAULT_TYPE) -> Database:
@@ -30,8 +32,10 @@ def rejection_text(status: AuthStatus) -> str:
 
 
 def clear_note_state(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Cancel any pending typed input (a note, or the specialty answer)."""
     if context.user_data is not None:
         context.user_data.pop(NOTE_STATE_KEY, None)
+        context.user_data.pop(SPECIALTY_STATE_KEY, None)
 
 
 async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE, keep_note_state: bool = False) -> bool:
