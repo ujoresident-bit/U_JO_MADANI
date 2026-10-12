@@ -5,6 +5,7 @@ helpers (authorization guard, message editing) live in common.py.
 """
 from __future__ import annotations
 
+import html
 import logging
 
 from telegram import InlineKeyboardMarkup, Update
@@ -13,7 +14,7 @@ from telegram.ext import Application, CallbackQueryHandler, CommandHandler, Cont
 
 import texts
 from auth import authorize
-from common import clear_note_state, get_db, guard, rejection_text, show, show_card
+from common import SPECIALTY_STATE_KEY, clear_note_state, get_db, guard, rejection_text, show, show_card
 from database import Database, DatabaseError
 from flashcards import (
     CB_CONTINUE,
@@ -51,8 +52,63 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await message.reply_text(rejection_text(auth.status))
         return
 
+    # Ask once, right after the welcome: "which specialty are you applying for?"
+    try:
+        answered = await db.has_specialty(user.id)
+    except DatabaseError:
+        answered = True  # never block the bot if this check fails
+    if not answered:
+        context.user_data[SPECIALTY_STATE_KEY] = True
+        await message.reply_text(texts.WELCOME)
+        await message.reply_text(texts.SPECIALTY_PROMPT)
+        return
+
     text, keyboard = await _home_view(db, user.id)
     await message.reply_text(text, reply_markup=keyboard)
+
+
+# --------------------------------------------------------------------- specialty
+SPECIALTY_MIN_CHARS = 2
+SPECIALTY_MAX_CHARS = 100
+
+
+async def on_specialty_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """The user's answer to "which specialty?" -> saved on their allowed_users row."""
+    if not await guard(update, context, keep_note_state=True):
+        return
+    user, message, db = update.effective_user, update.effective_message, get_db(context)
+
+    specialty = " ".join((message.text or "").split())  # tidy spaces / new lines
+    if not SPECIALTY_MIN_CHARS <= len(specialty) <= SPECIALTY_MAX_CHARS:
+        await message.reply_text(texts.SPECIALTY_INVALID)
+        return  # keep waiting for a valid answer
+
+    await db.save_specialty(user.id, specialty)
+    clear_note_state(context)
+    log.info("Specialty saved: telegram_id=%s", user.id)
+
+    _, keyboard = await _home_view(db, user.id)
+    await message.reply_text(
+        texts.SPECIALTY_SAVED.format(specialty=html.escape(specialty, quote=False)),
+        reply_markup=keyboard,
+    )
+
+
+async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Typed text: the specialty answer if it is pending, otherwise a note."""
+    if (context.user_data or {}).get(SPECIALTY_STATE_KEY):
+        await on_specialty_text(update, context)
+    else:
+        await on_note_text(update, context)
+
+
+async def on_other_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Photo, sticker, voice...: ask for text if the specialty answer is pending."""
+    if (context.user_data or {}).get(SPECIALTY_STATE_KEY) and update.effective_message is not None:
+        if await guard(update, context, keep_note_state=True):
+            await update.effective_message.reply_text(texts.SPECIALTY_TEXT_ONLY)
+        return
+    await on_non_text(update, context)
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -186,6 +242,6 @@ def register_handlers(app: Application) -> None:
     app.add_handler(CallbackQueryHandler(on_note_button, pattern=r"^nt:"))
     app.add_handler(CallbackQueryHandler(on_notes_list, pattern=r"^nl:"))
     app.add_handler(CallbackQueryHandler(on_unknown_callback))
-    app.add_handler(MessageHandler(private & filters.TEXT & ~filters.COMMAND, on_note_text))
-    app.add_handler(MessageHandler(private & ~filters.TEXT & ~filters.COMMAND, on_non_text))
+    app.add_handler(MessageHandler(private & filters.TEXT & ~filters.COMMAND, on_text))
+    app.add_handler(MessageHandler(private & ~filters.TEXT & ~filters.COMMAND, on_other_message))
     app.add_error_handler(on_error)
