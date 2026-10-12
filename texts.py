@@ -23,6 +23,12 @@ HELP = (
     "• يتم حفظ مكانك تلقائيًا، واضغط <b>🚀 لنبدأ</b> للمتابعة."
 )
 
+# ------------------------------------------------------------------ specialty (asked once, after the welcome)
+SPECIALTY_PROMPT = "🩺 <b>ما هو التخصص الذي تتقدّم إليه؟</b>\n\nاكتب اسم التخصص وأرسله في رسالة."
+SPECIALTY_SAVED = "✅ تم حفظ تخصصك: <b>{specialty}</b>\n\nاضغط 🚀 لنبدأ للبدء."
+SPECIALTY_INVALID = "⚠️ الرجاء كتابة اسم التخصص (من 2 إلى 100 حرف)."
+SPECIALTY_TEXT_ONLY = "⚠️ الرجاء كتابة اسم التخصص كنص."
+
 # Rejection messages (Arabic, as specified)
 NOT_AUTHORIZED = "هذا البوت متاح للمستخدمين المصرح لهم فقط."
 NO_USERNAME = (
