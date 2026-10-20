@@ -156,3 +156,14 @@ async def with_number(db: Database, telegram_user_id: int, card: Row) -> Row:
     if i < len(order) and order[i][2] == int(card["id"]):
         return {**card, "display_number": i + 1}
     return card
+
+
+async def total_count(db: Database, telegram_user_id: int) -> int:
+    """How many questions this user can browse right now."""
+    return len(await _order(db, telegram_user_id))
+
+
+async def card_at_number(db: Database, telegram_user_id: int, number: int) -> Row | None:
+    """QUESTION <number> in this user's order (1 = first)."""
+    order = await _order(db, telegram_user_id)
+    return await _fetch(db, order, int(number) - 1, 1)
