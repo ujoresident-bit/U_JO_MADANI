@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import html
 import logging
+import re
 
+from telegram import InlineKeyboardButton as Button
 from telegram import InlineKeyboardMarkup, Update
 from telegram.error import Conflict, Forbidden, NetworkError, TimedOut
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
@@ -17,6 +19,7 @@ from auth import authorize
 from common import SPECIALTY_STATE_KEY, clear_note_state, get_db, guard, rejection_text, show, show_card
 from database import Database, DatabaseError
 from flashcards import (
+    CB_BLOCKS,
     CB_CONTINUE,
     CB_FIRST,
     CB_HOME,
@@ -109,6 +112,100 @@ async def on_other_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             await update.effective_message.reply_text(texts.SPECIALTY_TEXT_ONLY)
         return
     await on_non_text(update, context)
+
+
+# --------------------------------------------------------------------- blocks (jump)
+BLOCK_SIZE = 100   # one block = 100 questions
+GROUP_SIZE = 10    # inside a block: groups of 10
+_BLOCK_RE = re.compile(r"^bk:(\d{1,6})$")
+_GO_RE = re.compile(r"^go:(\d{1,6})$")
+
+
+def _range_label(start: int, end: int) -> str:
+    return f"{start} – {end}"
+
+
+async def _current_number(db: Database, telegram_user_id: int) -> int | None:
+    """The QUESTION number this user is at (from saved progress), if any."""
+    try:
+        card = await resolve_continue_card(db, telegram_user_id)
+    except DatabaseError:
+        return None
+    return int(card["display_number"]) if card and card.get("display_number") else None
+
+
+async def _blocks_view(db: Database, telegram_user_id: int) -> tuple[str, InlineKeyboardMarkup]:
+    total = await question_order.total_count(db, telegram_user_id)
+    here = await _current_number(db, telegram_user_id)
+    buttons = []
+    for start in range(1, total + 1, BLOCK_SIZE):
+        end = min(start + BLOCK_SIZE - 1, total)
+        mark = "📍 " if here is not None and start <= here <= end else ""
+        buttons.append(Button(mark + _range_label(start, end), callback_data=f"bk:{start}"))
+    rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
+    rows.append([Button(texts.BTN_HOME, callback_data=CB_HOME)])
+    text = texts.BLOCKS_TITLE.format(total=total)
+    if here is not None:
+        text += "\n\n" + texts.BLOCKS_HERE.format(number=here)
+    return text, InlineKeyboardMarkup(rows)
+
+
+async def _block_view(db: Database, telegram_user_id: int, start: int) -> tuple[str, InlineKeyboardMarkup] | None:
+    total = await question_order.total_count(db, telegram_user_id)
+    if start < 1 or start > total or (start - 1) % BLOCK_SIZE:
+        return None
+    end = min(start + BLOCK_SIZE - 1, total)
+    here = await _current_number(db, telegram_user_id)
+    buttons = []
+    for g in range(start, end + 1, GROUP_SIZE):
+        g_end = min(g + GROUP_SIZE - 1, end)
+        mark = "📍 " if here is not None and g <= here <= g_end else ""
+        buttons.append(Button(mark + _range_label(g, g_end), callback_data=f"go:{g}"))
+    rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
+    rows.append([
+        Button(texts.BTN_BLOCKS, callback_data=CB_BLOCKS),
+        Button(texts.BTN_HOME, callback_data=CB_HOME),
+    ])
+    text = texts.BLOCK_TITLE.format(start=start, end=end)
+    if here is not None and start <= here <= end:
+        text += "\n\n" + texts.BLOCKS_HERE.format(number=here)
+    return text, InlineKeyboardMarkup(rows)
+
+
+async def on_blocks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """bk -> blocks of 100, bk:<start> -> groups of 10, go:<n> -> open QUESTION n."""
+    query = update.callback_query
+    if query is None or not await guard(update, context):
+        return
+    user, data, db = query.from_user, query.data or "", get_db(context)
+
+    if data == CB_BLOCKS:
+        await query.answer()
+        text, keyboard = await _blocks_view(db, user.id)
+        await show(update, context, text, keyboard)
+        return
+
+    if (match := _BLOCK_RE.match(data)) is not None:
+        view = await _block_view(db, user.id, int(match.group(1)))
+        if view is None:
+            await query.answer(texts.UNKNOWN_ACTION, show_alert=True)
+            return
+        await query.answer()
+        await show(update, context, *view)
+        return
+
+    if (match := _GO_RE.match(data)) is not None:
+        card = await question_order.card_at_number(db, user.id, int(match.group(1)))
+        if card is None:
+            await query.answer(texts.INVALID_CARD, show_alert=True)
+            return
+        await query.answer()
+        await show_card(update, context, card)
+        log.info("Jumped to question: telegram_id=%s card_id=%s", user.id, card["id"])
+        context.application.create_task(_save_progress(db, user.id, card["id"]), update=update)
+        return
+
+    await query.answer(texts.UNKNOWN_ACTION, show_alert=True)
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -241,6 +338,7 @@ def register_handlers(app: Application) -> None:
     app.add_handler(CallbackQueryHandler(on_saved, pattern=r"^sv:"))
     app.add_handler(CallbackQueryHandler(on_note_button, pattern=r"^nt:"))
     app.add_handler(CallbackQueryHandler(on_notes_list, pattern=r"^nl:"))
+    app.add_handler(CallbackQueryHandler(on_blocks, pattern=r"^(bk|bk:\d+|go:\d+)$"))
     app.add_handler(CallbackQueryHandler(on_unknown_callback))
     app.add_handler(MessageHandler(private & filters.TEXT & ~filters.COMMAND, on_text))
     app.add_handler(MessageHandler(private & ~filters.TEXT & ~filters.COMMAND, on_other_message))
