@@ -11,6 +11,9 @@ Callback data (short, never contains card content or user IDs):
     sv:list:<page>           -> saved list page    sv:noop         -> page label
     nt:<act>:<id>:<r>        -> notes: add | edit | view | del | yes | cancel
     nl:<page>                -> "my notes" list page   nl:noop -> page label
+    bk                       -> blocks of 100 questions
+    bk:<start>               -> groups of 10 inside the block starting at <start>
+    go:<n>                   -> open QUESTION <n> (this user's numbering)
 
 <r> only remembers whether the answer is currently visible, so the screen
 can be redrawn the same way. The card id only says which card is on screen;
@@ -36,6 +39,7 @@ CB_HOME = "home"
 CB_FIRST = "fc:first"
 CB_CONTINUE = "fc:cont"
 CB_SAVED_NOOP = "sv:noop"
+CB_BLOCKS = "bk"
 NEXT = "next"
 PREV = "prev"
 
@@ -188,6 +192,7 @@ def card_keyboard(card: Row, revealed: bool = False, is_saved: bool = False, has
         Button(texts.BTN_NEXT, callback_data=nav_data(NEXT, card_id)),
     ])
     rows.append([
+        Button(texts.BTN_BLOCKS, callback_data=CB_BLOCKS),
         Button(texts.BTN_SAVED_LIST, callback_data=saved_list_data(0)),
         Button(texts.BTN_HOME, callback_data=CB_HOME),
     ])
@@ -215,6 +220,7 @@ def home_keyboard(continue_card: Row | None) -> InlineKeyboardMarkup:
             [Button(texts.BTN_START, callback_data=CB_CONTINUE)],
             [Button(texts.BTN_FROM_BEGINNING, callback_data=CB_FIRST)],
         ]
+    rows.append([Button(texts.BTN_BLOCKS, callback_data=CB_BLOCKS)])
     rows.append([
         Button(texts.BTN_SAVED_LIST, callback_data=saved_list_data(0)),
         Button(texts.BTN_NOTES_LIST, callback_data=notes_list_data(0)),
