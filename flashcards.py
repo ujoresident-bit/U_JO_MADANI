@@ -128,6 +128,8 @@ def question_and_answer(card: Row) -> tuple[str, str]:
     answer = (card.get("answer") or "").strip()
     if answer:
         return (card.get("content") or "").strip(), answer
+    if card.get("department"):  # interview question: shown as written, never split
+        return (card.get("content") or "").strip(), ""
     return split_content(card.get("content"))
 
 
