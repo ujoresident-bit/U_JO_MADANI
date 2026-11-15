@@ -16,7 +16,7 @@ from telegram.ext import Application, CallbackQueryHandler, CommandHandler, Cont
 
 import texts
 from auth import authorize
-from common import SPECIALTY_STATE_KEY, clear_note_state, get_db, guard, rejection_text, show, show_card
+from common import INTERVIEW_STATE_KEY, SPECIALTY_STATE_KEY, clear_note_state, get_db, guard, rejection_text, show, show_card
 from database import Database, DatabaseError
 from flashcards import (
     CB_BLOCKS,
@@ -29,6 +29,7 @@ from flashcards import (
     parse_open,
     resolve_continue_card,
 )
+import interview
 import question_order
 from notes import on_non_text, on_note_button, on_note_text
 from my_notes import on_notes_list
@@ -37,9 +38,17 @@ from saved import on_saved
 log = logging.getLogger(__name__)
 
 
-async def _home_view(db: Database, telegram_user_id: int) -> tuple[str, InlineKeyboardMarkup]:
+async def home_view(db: Database, telegram_user_id: int) -> tuple[str, InlineKeyboardMarkup]:
+    """Home screen; users not yet verified for the interview get the specialty list."""
+    dept = await db.get_user_department(telegram_user_id)
+    if dept is None:
+        return interview.choose_view()
     continue_card = await resolve_continue_card(db, telegram_user_id)
-    return texts.WELCOME, home_keyboard(continue_card)
+    text = f"{texts.WELCOME}\n\n{texts.IV_HOME.format(dept=html.escape(dept))}"
+    return text, home_keyboard(continue_card)
+
+
+_home_view = home_view  # old name
 
 
 # --------------------------------------------------------------------- commands
@@ -55,18 +64,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await message.reply_text(rejection_text(auth.status))
         return
 
-    # Ask once, right after the welcome: "which specialty are you applying for?"
-    try:
-        answered = await db.has_specialty(user.id)
-    except DatabaseError:
-        answered = True  # never block the bot if this check fails
-    if not answered:
-        context.user_data[SPECIALTY_STATE_KEY] = True
-        await message.reply_text(texts.WELCOME)
-        await message.reply_text(texts.SPECIALTY_PROMPT)
-        return
-
-    text, keyboard = await _home_view(db, user.id)
+    # Not verified for the interview yet -> home_view shows the specialty list
+    text, keyboard = await home_view(db, user.id)
     await message.reply_text(text, reply_markup=keyboard)
 
 
@@ -90,7 +89,7 @@ async def on_specialty_text(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     clear_note_state(context)
     log.info("Specialty saved: telegram_id=%s", user.id)
 
-    _, keyboard = await _home_view(db, user.id)
+    _, keyboard = await home_view(db, user.id)
     await message.reply_text(
         texts.SPECIALTY_SAVED.format(specialty=html.escape(specialty, quote=False)),
         reply_markup=keyboard,
@@ -98,15 +97,20 @@ async def on_specialty_text(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Typed text: the specialty answer if it is pending, otherwise a note."""
-    if (context.user_data or {}).get(SPECIALTY_STATE_KEY):
+    """Typed text: interview name, specialty answer, or a note — whichever is pending."""
+    if (context.user_data or {}).get(INTERVIEW_STATE_KEY):
+        await interview.on_name_text(update, context)
+    elif (context.user_data or {}).get(SPECIALTY_STATE_KEY):
         await on_specialty_text(update, context)
     else:
         await on_note_text(update, context)
 
 
 async def on_other_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Photo, sticker, voice...: ask for text if the specialty answer is pending."""
+    """Photo, sticker, voice...: ask for text if a name / specialty answer is pending."""
+    if (context.user_data or {}).get(INTERVIEW_STATE_KEY):
+        await interview.on_name_non_text(update, context)
+        return
     if (context.user_data or {}).get(SPECIALTY_STATE_KEY) and update.effective_message is not None:
         if await guard(update, context, keep_note_state=True):
             await update.effective_message.reply_text(texts.SPECIALTY_TEXT_ONLY)
@@ -179,6 +183,11 @@ async def on_blocks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     user, data, db = query.from_user, query.data or "", get_db(context)
 
+    if await db.get_user_department(user.id) is None:  # not verified for the interview
+        await query.answer()
+        await show(update, context, *interview.choose_view())
+        return
+
     if data == CB_BLOCKS:
         await query.answer()
         text, keyboard = await _blocks_view(db, user.id)
@@ -228,10 +237,16 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     data = query.data or ""
     db = get_db(context)
 
+    # Not verified for the interview: show the specialty list instead of questions
+    if await db.get_user_department(user.id) is None:
+        await query.answer()
+        await show(update, context, *interview.choose_view())
+        return
+
     # Home
     if data == CB_HOME:
         await query.answer()
-        text, keyboard = await _home_view(db, user.id)
+        text, keyboard = await home_view(db, user.id)
         await show(update, context, text, keyboard)
         return
 
@@ -339,6 +354,7 @@ def register_handlers(app: Application) -> None:
     app.add_handler(CallbackQueryHandler(on_note_button, pattern=r"^nt:"))
     app.add_handler(CallbackQueryHandler(on_notes_list, pattern=r"^nl:"))
     app.add_handler(CallbackQueryHandler(on_blocks, pattern=r"^(bk|bk:\d+|go:\d+)$"))
+    app.add_handler(CallbackQueryHandler(interview.on_interview_button, pattern=r"^iv:"))
     app.add_handler(CallbackQueryHandler(on_unknown_callback))
     app.add_handler(MessageHandler(private & filters.TEXT & ~filters.COMMAND, on_text))
     app.add_handler(MessageHandler(private & ~filters.TEXT & ~filters.COMMAND, on_other_message))
