@@ -26,11 +26,13 @@ log = logging.getLogger(__name__)
 
 USERS = "allowed_users"
 CARDS = "flashcards"
+CANDIDATES = "interview_candidates"
+DEPT_CACHE_SECONDS = 300  # how long a user's interview specialty is remembered
 PROGRESS = "user_progress"
 SAVED = "saved_flashcards"
 NOTES = "user_notes"
 
-CARD_COLUMNS = "id,content,answer,category,year,order_number,is_active,created_at"
+CARD_COLUMNS = "id,content,answer,category,year,order_number,is_active,created_at,department"
 USER_COLUMNS = "id,username,telegram_user_id,status"
 
 Row = dict[str, Any]
@@ -65,6 +67,8 @@ class Database:
         self._user_state: dict[int, tuple[float, set[int], set[int]]] = {}
         # users who already answered the specialty question
         self._specialty_done: set[int] = set()
+        # interview: telegram_user_id -> (loaded_at, department or None)
+        self._dept: dict[int, tuple[float, str | None]] = {}
 
     async def _run(self, fn: Callable[[], Any]) -> Any:
         try:
@@ -155,6 +159,50 @@ class Database:
             .execute()
         )
         self._specialty_done.add(telegram_user_id)
+
+    # ------------------------------------------------------------ interview candidates
+    async def get_user_department(self, telegram_user_id: int) -> str | None:
+        """The interview specialty this user verified for, or None (not verified)."""
+        cached = self._dept.get(telegram_user_id)
+        if cached is not None and time.monotonic() - cached[0] < DEPT_CACHE_SECONDS:
+            return cached[1]
+        res = await self._run(
+            lambda: self._client.table(CANDIDATES)
+            .select("department")
+            .eq("claimed_by", telegram_user_id)
+            .limit(1)
+            .execute()
+        )
+        row = _first(res)
+        dept = row.get("department") if row else None
+        self._dept[telegram_user_id] = (time.monotonic(), dept)
+        return dept
+
+    async def get_candidates(self, department: str) -> list[Row]:
+        """All candidates of one specialty (id, name_key, claimed_by) — always fresh."""
+        res = await self._run(
+            lambda: self._client.table(CANDIDATES)
+            .select("id,name_key,claimed_by")
+            .eq("department", department)
+            .order("id")
+            .execute()
+        )
+        return list(getattr(res, "data", None) or [])
+
+    async def claim_candidate(self, candidate_id: int, telegram_user_id: int) -> bool:
+        """Link a candidate row to this Telegram ID, only if no one has it yet."""
+        res = await self._run(
+            lambda: self._client.table(CANDIDATES)
+            .update({"claimed_by": telegram_user_id, "claimed_at": _now()})
+            .eq("id", candidate_id)
+            .is_("claimed_by", "null")
+            .execute()
+        )
+        row = _first(res)
+        if row is None:
+            return False
+        self._dept[telegram_user_id] = (time.monotonic(), row.get("department"))
+        return True
 
     # ------------------------------------------------------------ flashcards
     def _cards_fresh(self) -> bool:
