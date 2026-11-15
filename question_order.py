@@ -37,12 +37,13 @@ MAX_SKIP = 5                # questions hidden in the last minute are skipped
 BASE_ORDER_NUMBER = 600     # questions 1..600 = the questions the bot launched with
 _SALT = "ujo-question-order-v1"
 
-_active: list[tuple[int, str]] = []      # (card_id, batch) of the active questions
+_active: list[tuple[int, str, str | None]] = []  # (card_id, batch, department) of the active questions
 _batch_of: dict[int, str] = {}           # card_id -> batch
+_dept_of: dict[int, str | None] = {}     # card_id -> interview department (None = exam question)
 _loaded_at: float | None = None
 _generation = 0
 _lock = asyncio.Lock()
-_user_orders: dict[int, tuple[int, list[tuple[str, int, int]]]] = {}
+_user_orders: dict[int, tuple[int, str | None, list[tuple[str, int, int]]]] = {}
 
 
 def sort_key(telegram_user_id: int, card_id: int) -> int:
@@ -65,8 +66,8 @@ def batch_key(card: Row) -> str:
     return created or "9999"  # unknown upload time -> at the very end
 
 
-async def _get_active(db: Database) -> list[tuple[int, str]]:
-    global _active, _batch_of, _loaded_at, _generation
+async def _get_active(db: Database) -> list[tuple[int, str, str | None]]:
+    global _active, _batch_of, _dept_of, _loaded_at, _generation
     if _loaded_at is not None and time.monotonic() - _loaded_at < CACHE_SECONDS:
         return _active
     async with _lock:
@@ -78,26 +79,44 @@ async def _get_active(db: Database) -> list[tuple[int, str]]:
             if _loaded_at is not None:
                 return _active  # keep working with the last known list
             raise
-        active = [(int(c["id"]), batch_key(c)) for c in cards]
+        active = [(int(c["id"]), batch_key(c), c.get("department")) for c in cards]
         if active != _active:
             _active = active
-            _batch_of = dict(active)
+            _batch_of = {cid: batch for cid, batch, _ in active}
+            _dept_of = {cid: dept for cid, _, dept in active}
             _generation += 1
         _loaded_at = time.monotonic()
     return _active
 
 
 async def _order(db: Database, telegram_user_id: int) -> list[tuple[str, int, int]]:
-    """This user's order as a sorted list of (batch, key, card_id)."""
+    """This user's order as a sorted list of (batch, key, card_id).
+
+    Only the questions of the user's verified interview specialty are included;
+    a user who is not verified gets an empty list.
+    """
     active = await _get_active(db)
+    dept = await db.get_user_department(telegram_user_id)
     cached = _user_orders.get(telegram_user_id)
-    if cached is not None and cached[0] == _generation:
-        return cached[1]
-    order = sorted((batch, sort_key(telegram_user_id, card_id), card_id) for card_id, batch in active)
+    if cached is not None and cached[0] == _generation and cached[1] == dept:
+        return cached[2]
+    if dept is None:
+        order = []
+    else:
+        order = sorted(
+            (batch, sort_key(telegram_user_id, card_id), card_id)
+            for card_id, batch, card_dept in active
+            if card_dept == dept
+        )
     if len(_user_orders) > 2000:
         _user_orders.clear()
-    _user_orders[telegram_user_id] = (_generation, order)
+    _user_orders[telegram_user_id] = (_generation, dept, order)
     return order
+
+
+def forget_user(telegram_user_id: int) -> None:
+    """Drop the cached order of a user (e.g. right after interview verification)."""
+    _user_orders.pop(telegram_user_id, None)
 
 
 async def _fetch(db: Database, order: list[tuple[str, int, int]], index: int, step: int) -> Row | None:
@@ -140,7 +159,19 @@ async def previous_card(db: Database, telegram_user_id: int, card_id: int) -> Ro
 
 
 async def card_at_or_after(db: Database, telegram_user_id: int, card_id: int) -> Row | None:
-    """The card itself if still active, otherwise the next one in this user's order."""
+    """The card itself if still active, otherwise the next one in this user's order.
+
+    None if the card belongs to another set of questions (e.g. an old exam question).
+    """
+    card_id = int(card_id)
+    await _get_active(db)
+    if card_id in _dept_of:
+        card_dept = _dept_of[card_id]
+    else:
+        old = await db.get_card(card_id, active_only=False)
+        card_dept = old.get("department") if old else None
+    if card_dept is None or card_dept != await db.get_user_department(telegram_user_id):
+        return None
     order = await _order(db, telegram_user_id)
     pos = await _position(db, telegram_user_id, card_id)
     return await _fetch(db, order, bisect.bisect_left(order, pos), 1)
