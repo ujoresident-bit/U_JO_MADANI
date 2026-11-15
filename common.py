@@ -21,6 +21,8 @@ log = logging.getLogger(__name__)
 NOTE_STATE_KEY = "note_input"
 # Waiting for the answer to "which specialty?" (same per-user dict)
 SPECIALTY_STATE_KEY = "specialty_input"
+# Waiting for the interview candidate name (value = the chosen specialty)
+INTERVIEW_STATE_KEY = "interview_dept"
 
 
 def get_db(context: ContextTypes.DEFAULT_TYPE) -> Database:
@@ -36,6 +38,7 @@ def clear_note_state(context: ContextTypes.DEFAULT_TYPE) -> None:
     if context.user_data is not None:
         context.user_data.pop(NOTE_STATE_KEY, None)
         context.user_data.pop(SPECIALTY_STATE_KEY, None)
+        context.user_data.pop(INTERVIEW_STATE_KEY, None)
 
 
 async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE, keep_note_state: bool = False) -> bool:
